@@ -325,7 +325,13 @@ func BenchmarkWithMiddleware(b *testing.B) {
 			handler.ServeHTTP(w, r)
 		})
 	})
-	m.Get("/", func(w http.ResponseWriter, r *http.Request) {
+	m.With(
+		func(handler http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				handler.ServeHTTP(w, r)
+			})
+		},
+	).Get("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 

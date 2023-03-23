@@ -17,13 +17,14 @@ type (
 	// Mux is a simple HTTP request multiplexer
 	Mux struct {
 		routes          map[string][]*route
-		middlewares     []func(http.HandlerFunc) http.HandlerFunc
+		middlewares     []func(http.Handler) http.Handler
 		notFoundHandler http.HandlerFunc
 	}
 
 	route struct {
-		path    string
-		handler http.HandlerFunc
+		path        string
+		handler     http.HandlerFunc
+		middlewares []func(http.Handler) http.Handler
 	}
 )
 
@@ -77,13 +78,20 @@ func (m *Mux) Trace(path string, handler http.HandlerFunc) {
 	m.append("TRACE", path, handler)
 }
 
+// With adds a new middleware function to the Mux
+func (m *Mux) With(middleware func(http.Handler) http.Handler) *Mux {
+	newMux := &Mux{
+		routes:          m.routes,
+		middlewares:     append([]func(http.Handler) http.Handler{}, m.middlewares...),
+		notFoundHandler: m.notFoundHandler,
+	}
+	newMux.middlewares = append(newMux.middlewares, middleware)
+	return newMux
+}
+
 // Use adds a new middleware function to the Mux
 func (m *Mux) Use(middleware func(http.Handler) http.Handler) {
-	m.middlewares = append(m.middlewares, func(handler http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			middleware(handler).ServeHTTP(w, r)
-		}
-	})
+	m.middlewares = append(m.middlewares, middleware)
 }
 
 // NotFound sets the handler to be called when no matching route is found
@@ -132,11 +140,11 @@ func (m *Mux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			r = r.WithContext(ctx)
 
 			handler := route.handler
-			for i := len(m.middlewares) - 1; i >= 0; i-- {
-				handler = m.middlewares[i](handler)
+			for i := len(route.middlewares) - 1; i >= 0; i-- {
+				handler = route.middlewares[i](http.HandlerFunc(handler.ServeHTTP)).(http.HandlerFunc)
 			}
 
-			handler(w, r)
+			handler.ServeHTTP(w, r)
 			return
 		}
 	}
@@ -153,7 +161,7 @@ func (m *Mux) append(method string, path string, handler http.HandlerFunc) {
 		}
 	}
 
-	m.routes[method] = append(routes, &route{path, handler})
+	m.routes[method] = append(routes, &route{path, handler, m.middlewares})
 }
 
 // Param retrieves the value of a named path parameter from the request context
